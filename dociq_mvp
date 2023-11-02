@@ -1,0 +1,104 @@
+
+# To Run Code: 
+    # export OPENAI_API_KEY=" " #[need to fill in with own OpenAi API Key]  
+    # streamlit rundociq_mvp.py
+
+#Set Up
+#[DONE] pip install langchain openai chromadb langchainhub
+#[DONE] pip install beautifulsoup4
+from langchain.llms import OpenAI
+llm = OpenAI(openai_api_key="    ") #[need to fill in with own OpenAi API Key]     
+import dotenv
+dotenv.load_dotenv()
+from langchain.embeddings import OpenAIEmbeddings
+embeddings = OpenAIEmbeddings(openai_api_key=' ') #[need to fill in with own OpenAi API Key]  
+
+
+
+#FRONT END
+import streamlit as st
+from langchain.llms import OpenAI
+
+st.title('DocIQ by JPMorgan')
+openai_api_key = st.sidebar.text_input('OpenAI API Key', type='password')
+
+
+#Document Loader
+from langchain.document_loaders import WebBaseLoader
+loader = WebBaseLoader("https://stripe.com/docs/payouts") #Enter any docs site
+data = loader.load()
+
+#Doc Splitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+text_splitter = RecursiveCharacterTextSplitter(chunk_size = 500, chunk_overlap = 0)
+splits = text_splitter.split_documents(data)
+
+# Embed and store splits
+from langchain.vectorstores import Chroma
+from langchain.embeddings import OpenAIEmbeddings
+vectorstore = Chroma.from_documents(documents=splits,embedding=OpenAIEmbeddings())
+retriever = vectorstore.as_retriever()
+
+# Retrieve using top K 
+question = "What is a document loader?"
+docs = vectorstore.similarity_search(question)
+len(docs)
+
+#Retrieve using SVM 
+from langchain.retrievers import SVMRetriever
+svm_retriever = SVMRetriever.from_documents(splits,OpenAIEmbeddings())
+docs_svm=svm_retriever.get_relevant_documents(question)
+len(docs_svm)
+
+#from sklearn.svm import SVC
+
+# Question Prompt 
+# https://smith.langchain.com/hub/rlm/rag-prompt
+from langchain import hub
+prompt = hub.pull("rlm/rag-prompt")
+
+#Generate: distill documents into an answer using LLM
+from langchain.chains import RetrievalQA
+from langchain.chat_models import ChatOpenAI
+llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+
+# RetrievalQA
+qa_chain = RetrievalQA.from_chain_type(
+    llm,
+    retriever=vectorstore.as_retriever(),
+    chain_type_kwargs={"prompt": prompt}
+)
+
+
+
+
+def generate_response(input_text):
+    question = input_text
+    result = qa_chain({"query": question})
+    print(result["result"])
+    llm = OpenAI(temperature=0.7, openai_api_key=openai_api_key)
+    st.info(result["result"])
+
+with st.form('my_form'):
+    text = st.text_area('What would you like to know about the docs?', 'Enter question here...')
+    submitted = st.form_submit_button('Submit')
+    if not openai_api_key.startswith('sk-'):
+        st.warning('Please enter your OpenAI API key!', icon='⚠')
+    if submitted and openai_api_key.startswith('sk-'):
+        generate_response(text)
+
+
+
+
+#Sample Questions for Stripe Docs 
+
+#Payments Docs
+#"What are examples of multiparty payments?"
+#"What digital wallets can customers integrate?"
+#"What are examples of popular Stripe APIs?"
+#"What are the sample projects?"
+
+#Payments Checkout Website 
+#"How do I test the page?"
+#"How do I install a Stripe Python Package?"
+#"What company owns this website?"
